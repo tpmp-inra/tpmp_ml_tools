@@ -16,7 +16,11 @@ list.of.packages <- c("shiny",
                       "RColorBrewer",
                       "shinyWidgets",
                       "tidyverse",
-                      "broom")
+                      "broom",
+                      "Rtsne",
+                      "factoextra",
+                      "cluster",
+                      "gtools")
 
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -34,8 +38,10 @@ library(broom)
 library(Rtsne)
 library(factoextra)
 library(cluster)
-library(shinyCommon)
+# library(shinyCommon)
 library(gtools)
+
+source("./shiny_helpers.R")
 
 # Define UI for application that draws a histogram
 ui <- fluidPage(
@@ -84,7 +90,11 @@ ui <- fluidPage(
   mainPanel(
     tabsetPanel(
       id = "selected_clustering_method",
-      tabPanel("Filtered CSV File",value = 1, tableOutput("filetable")),
+      tabPanel("Filtered CSV File",
+               value = 1, 
+               tabsetPanel(
+                 tabPanel("Dataframe", dataTableOutput("filetable")),
+                 tabPanel("Summary", verbatimTextOutput("dataframe_summary")))),
       tabPanel("PCA",
                value = 2,
                tabsetPanel(
@@ -115,7 +125,11 @@ ui <- fluidPage(
       tabPanel("Exploratory Factor Analysis (WIP)",
                value = 6,
                plotOutput(outputId = "efa_plot", inline = FALSE, hover = "efa_plot_hover"),
-               tableOutput("efa_observationInfo"))
+               tableOutput("efa_observationInfo")),
+      tabPanel("Spider plots (WIP)",
+               value = 7,
+               plotOutput(outputId = "spd_plot", inline = FALSE, hover = "spd_plot_hover"),
+               tableOutput("spd_observationInfo"))
     )
   )
 )
@@ -123,6 +137,8 @@ ui <- fluidPage(
 # Define server logic required to draw a histogram
 server <- function(input, output) {
 
+  options(shiny.maxRequestSize=30*1024^2) # Still not sure it's a good idea
+  
   # Data building functions -----------------------------------------------------
   # Single zoomable plot (on left)
   ranges <- reactiveValues(x = NULL, y = NULL)
@@ -155,13 +171,19 @@ server <- function(input, output) {
     facetSelector <- input$cbSplitScatter
     if (is.null(facetSelector)) return(NULL)
     
+    labelSelector <- input$cbShowLabels
+    if (is.null(labelSelector)) return(NULL)
+    
     if (sum(selVar %in% names(df)) > 0 & length(selTreatment) > 0) {
       withProgress(message = "Filtering data", value = 0, {
         df_filtered <- 
           df %>% 
           filter(trunc_day_after_start %in% input$cbDateTimeSelector) %>%
           filter(treatment %in% selTreatment) %>%
-          filter(plant %in% selPlant)
+          filter(plant %in% selPlant) %>%
+          unique() %>%
+          drop_na()
+          
         
         df_num <- df_filtered %>% subset(select=selVar)
         
@@ -196,7 +218,7 @@ server <- function(input, output) {
           col_to_remove <- c(col_to_remove, dotShape)
         }
         
-        if (!dotColor %in% colnames(df_num)) {
+        if ((dotColor != "none") & (!dotColor %in% colnames(df_num))) {
           df_num <- df_num %>% mutate(!!dotColor := df_filtered[[dotColor]])
           col_to_remove <- c(col_to_remove, dotColor)
         }
@@ -206,7 +228,14 @@ server <- function(input, output) {
           col_to_remove <- c(col_to_remove, facetSelector)
         }
         
-        return(list(df_num = unique(df_num),
+        if ((labelSelector != "none") & (!labelSelector %in% colnames(df_num))) {
+          df_num <- df_num %>% mutate(!!labelSelector := df_filtered[[labelSelector]])
+          col_to_remove <- c(col_to_remove, labelSelector)
+        }
+        
+        df_num <- df_num %>% drop_na()
+        
+        return(list(df_num = unique(df_num) %>% drop_na(),
                     col_to_remove = col_to_remove))
       })
     } else {
@@ -223,17 +252,20 @@ server <- function(input, output) {
     dotShape <- input$dotShape
     if (dotShape == 'none') dotShape <- NULL
     
+    dotColor <- input$colorBy
+    if (dotColor == 'none') dotColor <- NULL
+    
     return(list(dotSize = dotSize,
-                dotShape = dotShape))
+                dotShape = dotShape,
+                dotColor = dotColor))
   })
   
   # Calculates and groups PCA data
   pca_data <- reactive({
-    req(input$chkShowLoadings)
     df <- filtered_data()
     if (is.null(df)) return(NULL)
     withProgress(message = "Building PCA", value = 0, {
-      df_num <- df$df_num
+      df_num <- df$df_num %>% drop_na()
       col_to_remove <- df$col_to_remove
       
       df_pca <- 
@@ -278,7 +310,7 @@ server <- function(input, output) {
       
       df_filtered <- df_num[!duplicated(df_num[, setdiff(colnames(df_num), col_to_remove)]), ]
       set.seed(42)
-      tsne <- Rtsne(df_filtered, perplexity = input$perplexitySelector, dims = 3)
+      tsne <- Rtsne(select(df_filtered, -col_to_remove), perplexity = input$perplexitySelector, dims = 2)
     })
     data.frame(x = tsne$Y[,1], y = tsne$Y[,2], df_filtered)
   })
@@ -295,7 +327,7 @@ server <- function(input, output) {
       
       cmd <- cmdscale(dist(scale(df_filtered)), eig = T, k = 2)
     })
-    data.frame(x = cmd$points[, 1], y = cmd$points[, 1], df_num)
+    data.frame(x = cmd$points[, 1], y = cmd$points[, 2], df_num)
   })
   
   # Calculates K-means
@@ -326,10 +358,25 @@ server <- function(input, output) {
       
       df_filtered <- scale(select(df_num, -col_to_remove))
       
-      efa <- factanal(scale(df_filtered), 2, rotation="varimax")
+      efa <- factanal(scale(df_filtered), 2, rotation="varimax", scores="regression")
     })
     return(list(efa = efa, 
                 df_num = df_num))
+  })
+  
+  # Finalizes spider plot data
+  spd_data <- reactive({
+    df <- filtered_data()
+    if (is.null(df)) return(NULL)
+    withProgress(message = "Finalizing Spider plot data", value = 0, {
+      df_num <- df$df_num
+      col_to_remove <- df$col_to_remove
+      
+      normalize <- function(x) {
+        return((x-min(x)) / (max(x)-min(x)))
+      }
+      df_norm <- df_norm %>% mutate_if(is.numeric, funs(normalize(.) %>% as.vector))
+    })
   })
 
   
@@ -345,10 +392,11 @@ server <- function(input, output) {
                                        y = "y",
                                        size = dot_data()$dotSize,
                                        shape = dot_data()$dotShape,
-                                       colour = input$colorBy))
+                                       colour = dot_data()$dotColor,
+                                       alpha = 0.4))
       
       if (input$cbShowLabels != "none") {
-        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", color = input$colorBy, label = input$cbShowLabels), vjust = -1)
+        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", color = dot_data()$dotColor, label = input$cbShowLabels), vjust = -1)
       }
       
       if (!is.null(ranges$x) & !is.null(ranges$y)) {
@@ -383,10 +431,11 @@ server <- function(input, output) {
       gg <- gg + geom_point(aes_string(x = "x", y = "y", 
                                        size = dot_data()$dotSize,
                                        shape = dot_data()$dotShape, 
-                                       colour = input$colorBy))
+                                       colour = dot_data()$dotColor),
+                            alpha = 0.4)
       
       if (input$cbShowLabels != "none") {
-        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", color = input$colorBy, label = input$cbShowLabels), vjust = -1)
+        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", dot_data()$dotColor, label = input$cbShowLabels), vjust = -1)
       }
       
       if (!is.null(ranges$x) & !is.null(ranges$y)) {
@@ -427,8 +476,8 @@ server <- function(input, output) {
                      loadings.colour = 'black',
                      size = dot_data()$dotSize,
                      shape = dot_data()$dotShape,
-                     alpha = 0.7,
-                     colour = input$colorBy,
+                     alpha = 0.4,
+                     colour = dot_data()$dotColor,
                      frame = input$chkFrameClusters)
       if (input$cbShowLabels != "none") {
         gg <- gg + geom_text_repel(aes_string(color = input$colorBy, label = input$cbShowLabels), vjust = -1)
@@ -471,7 +520,8 @@ server <- function(input, output) {
                      size = dot_data()$dotSize,
                      shape = dot_data()$dotShape,
                      # colour = input$colorBy,
-                     frame = input$chkFrameClusters)
+                     frame = input$chkFrameClusters,
+                     alpha = 0.4)
       if (input$cbShowLabels != "none") {
         gg <- gg + geom_text_repel(aes_string(color = input$colorBy, label = input$cbShowLabels), vjust = -1)
       }
@@ -498,7 +548,8 @@ server <- function(input, output) {
       gg <- autoplot(dt_efa$efa, 
                      data = dt_efa$df_num,
                      size = dot_data()$dotSize,
-                     shape = dot_data()$dotShape)
+                     shape = dot_data()$dotShape,
+                     alpha = 0.4)
       
       if (input$cbShowLabels != "none") {
         gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", color = input$colorBy, label = input$cbShowLabels), vjust = -1)
@@ -599,8 +650,19 @@ server <- function(input, output) {
     summary(pca_data()$pca)
   })
   
+  output$dataframe_summary <- renderPrint({
+    options(max.print=999999)
+    summary(filtered_data()$df_num)
+  })
+  
   
   # Text rendering functions -----------------------------------------------------
+  
+  #This previews the CSV data file
+  output$filetable <- renderDataTable({
+    filtered_data()$df_num
+  })
+  
   # Print t-SNE observation details
   output$tsne_observationInfo <- renderTable({
     df <-tsne_data()
@@ -625,6 +687,14 @@ server <- function(input, output) {
     nearPoints(df, input$mds_plot_hover, maxpoints = 3)
   })
   
+  # Print Spider plot observation details
+  output$spd_observationInfo <- renderTable({
+    df <- spd_data()
+    if (is.null(df)) return(NULL)
+    
+    nearPoints(df, input$spd_plot_hover, maxpoints = 3)
+  })
+  
   # Reacts to vover event to display dot data
   output$hovered_point <- renderText({
     dt_pca <- pca_data()
@@ -642,6 +712,7 @@ server <- function(input, output) {
   
   
   # Wigget initialization functions -----------------------------------------------------
+  
   #This function is repsonsible for loading in the selected file
   filedata <- reactive({
     load_experience_csv(input)
@@ -731,7 +802,12 @@ server <- function(input, output) {
     cb_options <- list()
     cb_options[ dsnames] <- dsnames
     cb_options <- cb_options[mixedorder(unlist(cb_options),decreasing=F)]
-    selectInput("colorBy", "Color dots using:", choices = cb_options, selected = "treatment")
+    if ('treatment' %in% cb_options) {
+      selected_choice <- 'treatment'
+    } else {
+      selected_choice <- 'none'
+    }
+    selectInput("colorBy", "Color dots using:", choices = c('none', cb_options), selected = selected_choice)
   })
   
   output$chkFrameClusters <- renderUI({
@@ -762,11 +838,6 @@ server <- function(input, output) {
     fill_time_selection(df)
   })
   
-  #This previews the CSV data file
-  output$filetable <- renderTable({
-    filtered_data()$df_num
-  })
-  
   # Perplexity t-SNE only
   output$perplexitySelector <- renderUI({
     df <-filedata()
@@ -794,6 +865,7 @@ server <- function(input, output) {
   })
   
   # Listeners -----------------------------------------------------
+  
   # When a double-click happens, check if there's a brush on the plot.
   # If so, zoom to the brush bounds; if not, reset the zoom.
   observeEvent(input$pca_plot_dblclick, {
