@@ -38,10 +38,9 @@ library(broom)
 library(Rtsne)
 library(factoextra)
 library(cluster)
-# library(shinyCommon)
 library(gtools)
 
-source("./shiny_helpers.R")
+source('./shiny_common_all.R')
 
 # Define UI for application that draws a histogram
 ui <- fluidPage(
@@ -121,15 +120,15 @@ ui <- fluidPage(
                           tableOutput("kms_observationInfo")),
                  tabPanel("Optimal cluster number (silhouette)", plotOutput(outputId = "kms_silhouette", inline = FALSE)),
                  tabPanel("Optimal cluster number (elbow)", plotOutput(outputId = "kms_elbow", inline = FALSE)),
-                 tabPanel("Optimal cluster number (gap)", plotOutput(outputId = "kms_gap", inline = FALSE)))),
-      tabPanel("Exploratory Factor Analysis (WIP)",
-               value = 6,
-               plotOutput(outputId = "efa_plot", inline = FALSE, hover = "efa_plot_hover"),
-               tableOutput("efa_observationInfo")),
-      tabPanel("Spider plots (WIP)",
-               value = 7,
-               plotOutput(outputId = "spd_plot", inline = FALSE, hover = "spd_plot_hover"),
-               tableOutput("spd_observationInfo"))
+                 tabPanel("Optimal cluster number (gap)", plotOutput(outputId = "kms_gap", inline = FALSE))))
+      # tabPanel("Exploratory Factor Analysis (WIP)",
+      #          value = 6,
+      #          plotOutput(outputId = "efa_plot", inline = FALSE, hover = "efa_plot_hover"),
+      #          tableOutput("efa_observationInfo")),
+      # tabPanel("Spider plots (WIP)",
+      #          value = 7,
+      #          plotOutput(outputId = "spd_plot", inline = FALSE, hover = "spd_plot_hover"),
+      #          tableOutput("spd_observationInfo"))
     )
   )
 )
@@ -478,7 +477,8 @@ server <- function(input, output) {
                      shape = dot_data()$dotShape,
                      alpha = 0.4,
                      colour = dot_data()$dotColor,
-                     frame = input$chkFrameClusters)
+                     frame = input$chkFrameClusters,
+                     frame.type = 'norm')
       if (input$cbShowLabels != "none") {
         gg <- gg + geom_text_repel(aes_string(color = input$colorBy, label = input$cbShowLabels), vjust = -1)
       }
@@ -505,6 +505,12 @@ server <- function(input, output) {
       if (input$cbSplitScatter != "none"){
         gg <- gg +  facet_wrap(input$cbSplitScatter)
       }
+      
+      gg <- gg + theme(legend.title = element_text(size=32, face = "bold"),
+                       legend.text=element_text(size=30),
+                       axis.text=element_text(size=20),
+                       axis.title=element_text(size=22,face="bold"),
+                       title = element_text(size=20))
     })
     
     gg 
@@ -756,7 +762,7 @@ server <- function(input, output) {
     cb_options <- cb_options[mixedorder(unlist(cb_options),decreasing=F)]
     pickerInput(
       inputId = "cbSelectedVariables", 
-      label = "PCA variables:", 
+      label = "Selected variables:", 
       choices = cb_options,
       options = list(
         `selected-text-format` = "count > 5",
@@ -783,7 +789,7 @@ server <- function(input, output) {
     df <-filedata()
     if (is.null(df)) return(NULL)
     
-    build_numeric_selectImput(df, "dotSize", "Dot Size:", "disease_index")
+    build_numeric_selectImput(df, "dotSize", "Dot Size:", "none")
   })
   
   # The following set of functions populate the dot size selectors
