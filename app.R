@@ -59,6 +59,7 @@ ui <- fluidPage(
     fluidRow(column(6,
                     uiOutput("cbTreatmentSelection"),
                     uiOutput("cbPlantSelection"),
+                    uiOutput("chkShowOutliers"),
                     uiOutput("cbSelectedVariables"),
                     uiOutput("chkFrameClusters"),
                     uiOutput("cbShowLabels")),
@@ -183,6 +184,9 @@ server <- function(input, output) {
           unique() %>%
           drop_na()
           
+        if (!input$chkShowOutliers & ("outlier" %in% colnames(df))) {
+          df_filtered <- df_filtered %>% filter(outlier == 0)
+        }
         
         df_num <- df_filtered %>% subset(select=selVar)
         
@@ -506,11 +510,11 @@ server <- function(input, output) {
         gg <- gg +  facet_wrap(input$cbSplitScatter)
       }
       
-      gg <- gg + theme(legend.title = element_text(size=32, face = "bold"),
-                       legend.text=element_text(size=30),
-                       axis.text=element_text(size=20),
-                       axis.title=element_text(size=22,face="bold"),
-                       title = element_text(size=20))
+      # gg <- gg + theme(legend.title = element_text(size=32, face = "bold"),
+      #                  legend.text=element_text(size=30),
+      #                  axis.text=element_text(size=20),
+      #                  axis.title=element_text(size=22,face="bold"),
+      #                  title = element_text(size=20))
     })
     
     gg 
@@ -820,6 +824,16 @@ server <- function(input, output) {
     df <-filedata()
     if (is.null(df)) return(NULL)
     checkboxInput("chkFrameClusters", "Frame clusters", FALSE)
+  })
+  
+  output$chkShowOutliers <- renderUI({
+    df <-filedata()
+    if (is.null(df)) return(NULL)
+    if ("outlier" %in% colnames(df)) {
+      checkboxInput("chkShowOutliers", paste('Show outliers (', length(which(df$outlier==1)), ')', sep=''), TRUE)
+    } else {
+      checkboxInput("chkShowOutliers", 'No outliers detected, option ignored', FALSE)
+    }
   })
   
   output$chkShowLoadings <- renderUI({
