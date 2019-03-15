@@ -50,11 +50,11 @@ ui <- fluidPage(
   
   # Sidebar with a slider input for number of bins 
   sidebarPanel(
-    fileInput('datafile', 
-              'Choose CSV file',
-              accept=c("text/csv", 
-                       "text/comma-separated-values,text/plain",
-                       ".csv")),
+    fileInput(inputId = 'datafile', 
+              label = 'Choose CSV file',
+              accept = c("text/csv", 
+                         "text/comma-separated-values,text/plain",
+                         ".csv")),
     
     fluidRow(column(6,
                     uiOutput("cbTreatmentSelection"),
@@ -62,15 +62,22 @@ ui <- fluidPage(
                     uiOutput("chkShowOutliers"),
                     uiOutput("cbSelectedVariables"),
                     uiOutput("chkFrameClusters"),
-                    uiOutput("cbShowLabels")),
+                    uiOutput("cbShowLabels")
+                    ),
              column(6,
                     uiOutput("dotSize"),
                     uiOutput("dotShape"),
                     uiOutput("colorBy"),
                     uiOutput("cbSplitScatter"),
-                    uiOutput("cbDateTimeSelector"))),
+                    uiOutput("cbDateTimeSelector")
+                    )
+             ),
     
-    conditionalPanel(condition="input.selected_clustering_method==2", uiOutput("chkShowLoadings")),
+    conditionalPanel(
+      condition="input.selected_clustering_method==2", 
+      fluidRow(column(6, uiOutput("ni_xPrincipalComponent"), uiOutput("chkShowLoadings")),
+               column(6, uiOutput("ni_yPrincipalComponent")))
+      ),
     conditionalPanel(condition="input.selected_clustering_method==3", uiOutput("perplexitySelector")),
     conditionalPanel(condition="input.selected_clustering_method==5", uiOutput("centerCount")),
     
@@ -83,6 +90,7 @@ ui <- fluidPage(
     tags$head(tags$style("#kms_elbow{height:70vh !important;}")),
     tags$head(tags$style("#kms_silhouette{height:70vh !important;}")),
     tags$head(tags$style("#kms_gap{height:70vh !important;}")),
+    tags$head(tags$style("#histogram_plot{height:90vh !important;}")),
     tags$head(tags$style("#efa_plot{height:70vh !important;}"))
   ),
   
@@ -121,7 +129,10 @@ ui <- fluidPage(
                           tableOutput("kms_observationInfo")),
                  tabPanel("Optimal cluster number (silhouette)", plotOutput(outputId = "kms_silhouette", inline = FALSE)),
                  tabPanel("Optimal cluster number (elbow)", plotOutput(outputId = "kms_elbow", inline = FALSE)),
-                 tabPanel("Optimal cluster number (gap)", plotOutput(outputId = "kms_gap", inline = FALSE))))
+                 tabPanel("Optimal cluster number (gap)", plotOutput(outputId = "kms_gap", inline = FALSE)))),
+      tabPanel("Histograms",
+               value = 6,
+               plotOutput(outputId = "histogram_plot", inline = FALSE))
       # tabPanel("Exploratory Factor Analysis (WIP)",
       #          value = 6,
       #          plotOutput(outputId = "efa_plot", inline = FALSE, hover = "efa_plot_hover"),
@@ -198,12 +209,11 @@ server <- function(input, output) {
           mutate(plant = df_filtered$plant) %>%
           mutate(treatment = df_filtered$treatment) %>%
           mutate(disease_index = df_filtered$disease_index) %>%
-          mutate(trunc_disease_index = df_filtered$trunc_disease_index) %>%
           mutate(day_after_start = df_filtered$day_after_start) %>%
           select(plant, treatment, disease_index, day_after_start, everything()) %>%
           drop_na()
         
-        col_to_remove <- c("plant", "treatment", "trunc_disease_index")
+        col_to_remove <- c("plant", "treatment")
         if (!"disease_index" %in% selVar | var(df_num$disease_index) < 0.001) {
           col_to_remove <- c(col_to_remove, "disease_index")
         }
@@ -236,6 +246,23 @@ server <- function(input, output) {
           col_to_remove <- c(col_to_remove, labelSelector)
         }
         
+        # Create color column
+        ccn = color_column_name()
+        if (dotColor != 'none') {
+          ccn.vector <- as.factor(df_num[,dotColor][[1]])
+          if (length(unique(ccn.vector)) > 20) {
+            ccn.vector <- df_num[,dotColor][[1]]
+          }
+          df_num <- 
+            df_num %>%
+            mutate(!!ccn := ccn.vector)
+        } else {
+          df_num <- 
+            df_num %>%
+            mutate(!!ccn := as.factor(1))
+        }
+        col_to_remove <- c(col_to_remove, color_column_name())
+        
         df_num <- df_num %>% drop_na()
         
         return(list(df_num = unique(df_num) %>% drop_na(),
@@ -255,12 +282,17 @@ server <- function(input, output) {
     dotShape <- input$dotShape
     if (dotShape == 'none') dotShape <- NULL
     
-    dotColor <- input$colorBy
-    if (dotColor == 'none') dotColor <- NULL
-    
     return(list(dotSize = dotSize,
-                dotShape = dotShape,
-                dotColor = dotColor))
+                dotShape = dotShape))
+  })
+  
+  color_column_name <- reactive({
+    dotColor <- input$colorBy
+    if (dotColor == 'none') {
+      'no_color'
+    } else {
+      paste('color', dotColor, 'xyz', sep = '_')
+    }
   })
   
   # Calculates and groups PCA data
@@ -382,9 +414,12 @@ server <- function(input, output) {
     })
   })
 
+  hist_data <- reactive({
+    filtered_data()
+  })
   
   # Main render functions -----------------------------------------------------
-  # Here it renders the t-SNE
+  ## Here it renders the t-SNE
   output$tsne_plot = renderPlot({
     dt_tsne <- tsne_data()
     if (is.null(dt_tsne)) return(NULL)
@@ -395,11 +430,11 @@ server <- function(input, output) {
                                        y = "y",
                                        size = dot_data()$dotSize,
                                        shape = dot_data()$dotShape,
-                                       colour = dot_data()$dotColor,
+                                       colour = color_column_name(),
                                        alpha = 0.4))
       
       if (input$cbShowLabels != "none") {
-        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", color = dot_data()$dotColor, label = input$cbShowLabels), vjust = -1)
+        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", color = color_column_name(), label = input$cbShowLabels), vjust = -1)
       }
       
       if (!is.null(ranges$x) & !is.null(ranges$y)) {
@@ -408,7 +443,7 @@ server <- function(input, output) {
       }
       
       if (input$chkFrameClusters) {
-        gg <- gg + stat_ellipse(aes_string(x = "x", y = "y", colour = input$colorBy), type = "t")
+        gg <- gg + stat_ellipse(aes_string(x = "x", y = "y", colour = color_column_name()), type = "t")
       }
       
       # Format title and axis
@@ -434,11 +469,11 @@ server <- function(input, output) {
       gg <- gg + geom_point(aes_string(x = "x", y = "y", 
                                        size = dot_data()$dotSize,
                                        shape = dot_data()$dotShape, 
-                                       colour = dot_data()$dotColor),
+                                       colour = color_column_name()),
                             alpha = 0.4)
       
       if (input$cbShowLabels != "none") {
-        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", dot_data()$dotColor, label = input$cbShowLabels), vjust = -1)
+        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", colour = color_column_name(), label = input$cbShowLabels), vjust = -1)
       }
       
       if (!is.null(ranges$x) & !is.null(ranges$y)) {
@@ -447,7 +482,7 @@ server <- function(input, output) {
       }
       
       if (input$chkFrameClusters) {
-        gg <- gg + stat_ellipse(aes_string(x = "x", y = "y", colour = input$colorBy), type = "t")
+        gg <- gg + stat_ellipse(aes_string(x = "x", y = "y", colour = color_column_name()), type = "t")
       }
       
       # Format title and axis
@@ -471,6 +506,8 @@ server <- function(input, output) {
     withProgress(message = "Rendering ", value = 0, {
       gg <- autoplot(dt_pca$pca,
                      data = dt_pca$df_num,
+                     x = input$ni_xPrincipalComponent,
+                     y = input$ni_yPrincipalComponent,
                      loadings = input$chkShowLoadings,
                      loadings.label = input$chkShowLoadings,
                      loadings.label.size = 5,
@@ -480,11 +517,11 @@ server <- function(input, output) {
                      size = dot_data()$dotSize,
                      shape = dot_data()$dotShape,
                      alpha = 0.4,
-                     colour = dot_data()$dotColor,
+                     colour = color_column_name(),
                      frame = input$chkFrameClusters,
                      frame.type = 'norm')
       if (input$cbShowLabels != "none") {
-        gg <- gg + geom_text_repel(aes_string(color = input$colorBy, label = input$cbShowLabels), vjust = -1)
+        gg <- gg + geom_text_repel(aes_string(color = color_column_name(), label = input$cbShowLabels), vjust = -1)
       }
       
       if (!is.null(ranges$x) & !is.null(ranges$y)) {
@@ -496,9 +533,9 @@ server <- function(input, output) {
       eigs <- dt_pca$pca$sdev^2
       eigs <- eigs / sum(eigs)
       gg <- gg + ggtitle(label = sprintf("Principal Component Analysis PC1: %s%%, PC2: %s%% Total: %s%%",
-                                         format(round(eigs[1] * 100, 2), nsmall = 2),
-                                         format(round(eigs[2] * 100, 2), nsmall = 2),
-                                         format(round((eigs[1] + eigs[2]) * 100 ), 2), nsmall = 2))
+                                         format(round(eigs[input$ni_xPrincipalComponent] * 100, 2), nsmall = 2),
+                                         format(round(eigs[input$ni_yPrincipalComponent] * 100, 2), nsmall = 2),
+                                         format(round((eigs[input$ni_xPrincipalComponent] + eigs[input$ni_yPrincipalComponent]) * 100 ), 2), nsmall = 2))
       
       # Format title and axis
       gg <- gg + theme(plot.title = element_text(hjust=0.5, vjust=0.5, size=20, face = "bold"))
@@ -529,11 +566,10 @@ server <- function(input, output) {
                      data = dt_kms$df_num,
                      size = dot_data()$dotSize,
                      shape = dot_data()$dotShape,
-                     # colour = input$colorBy,
                      frame = input$chkFrameClusters,
                      alpha = 0.4)
       if (input$cbShowLabels != "none") {
-        gg <- gg + geom_text_repel(aes_string(color = input$colorBy, label = input$cbShowLabels), vjust = -1)
+        gg <- gg + geom_text_repel(aes_string(color = color_column_name(), label = input$cbShowLabels), vjust = -1)
       }
       
       if (!is.null(ranges$x) & !is.null(ranges$y)) {
@@ -550,6 +586,19 @@ server <- function(input, output) {
     gg 
   })
   
+  ## Here it renders the histograms
+  output$histogram_plot = renderPlot({
+    df_hist <- hist_data()$df_num
+    ctr <- hist_data()$col_to_remove
+    if (is.null(df_hist)) return(NULL)
+    
+    df_hist %>% 
+      gather(key="key", value="value", -ctr) %>%
+      ggplot(aes(value)) + 
+      geom_histogram(aes_string(colour = color_column_name())) +
+      facet_wrap(~key, scales = "free")
+  })
+  
   # Here it renders the EFA
   output$efa_plot = renderPlot({
     dt_efa <- efa_data()
@@ -562,7 +611,7 @@ server <- function(input, output) {
                      alpha = 0.4)
       
       if (input$cbShowLabels != "none") {
-        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", color = input$colorBy, label = input$cbShowLabels), vjust = -1)
+        gg <- gg + geom_text_repel(aes_string(x = "x", y = "y", color = color_column_name(), label = input$cbShowLabels), vjust = -1)
       }
       
       if (!is.null(ranges$x) & !is.null(ranges$y)) {
@@ -571,7 +620,7 @@ server <- function(input, output) {
       }
       
       if (input$chkFrameClusters) {
-        gg <- gg + stat_ellipse(aes_string(x = "x", y = "y", colour = input$colorBy), type = "t")
+        gg <- gg + stat_ellipse(aes_string(x = "x", y = "y", colour = color_column_name()), type = "t")
       }
       
       # Format title and axis
@@ -840,6 +889,25 @@ server <- function(input, output) {
     df <-filedata()
     if (is.null(df)) return(NULL)
     checkboxInput("chkShowLoadings", "Show component loadings", TRUE)
+  })
+  
+  output$ni_xPrincipalComponent <- renderUI({
+    req(input$cbSelectedVariables)
+    numericInput(inputId = "ni_xPrincipalComponent", label = "PCX", value = 1, min = 1, max = length(input$cbSelectedVariables) -1)
+  })
+  
+  output$ni_yPrincipalComponent <- renderUI({
+    req(input$cbSelectedVariables)
+    numericInput(inputId = "ni_yPrincipalComponent", label = "PCY", value = 2, min = 1, max = length(input$cbSelectedVariables) -1)
+  })
+  
+  output$cbShowLabels <- renderUI({
+    df <-filedata()
+    if (is.null(df)) return(NULL)
+    build_string_selectImput(df, 
+                             "cbShowLabels",  
+                             "Show plant name (if all dots are displayed graph will become cluttered:", 
+                             "none")
   })
   
   output$cbShowLabels <- renderUI({
