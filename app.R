@@ -888,7 +888,7 @@ server <- function(input, output) {
   output$chkShowLoadings <- renderUI({
     df <-filedata()
     if (is.null(df)) return(NULL)
-    checkboxInput("chkShowLoadings", "Show component loadings", TRUE)
+    checkboxInput("chkShowLoadings", "Show component loadings", FALSE)
   })
   
   output$ni_xPrincipalComponent <- renderUI({
