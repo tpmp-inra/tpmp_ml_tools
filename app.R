@@ -451,6 +451,12 @@ server <- function(input, output) {
       gg <- gg + theme(axis.title.x = element_text(size=20))
       gg <- gg + theme(axis.title.y = element_text(size=20))
       
+      
+      # Remove legend
+      if (nrow(unique(dt$df[,color_column_name()])) > 40) {
+        gg <- gg + theme(legend.position = "none")
+      }
+      
       # Scatter the PCA
       if (input$cbSplitScatter != "none"){
         gg <- gg +  facet_wrap(input$cbSplitScatter)
@@ -489,6 +495,11 @@ server <- function(input, output) {
       gg <- gg + theme(plot.title = element_text(hjust=0.5, vjust=0.5, size=20, face = "bold"))
       gg <- gg + theme(axis.title.x = element_text(size=20))
       gg <- gg + theme(axis.title.y = element_text(size=20))
+      
+      # Remove legend
+      if (nrow(unique(dt$df[,color_column_name()])) > 40) {
+        gg <- gg + theme(legend.position = "none")
+      }
       
       # Scatter the PCA
       if (input$cbSplitScatter != "none"){
@@ -542,6 +553,11 @@ server <- function(input, output) {
       gg <- gg + theme(axis.title.x = element_text(size=20))
       gg <- gg + theme(axis.title.y = element_text(size=20))
       
+      # Remove legend
+      if (nrow(unique(dt_pca$df_num[,color_column_name()])) > 40) {
+        gg <- gg + theme(legend.position = "none")
+      }
+      
       # Scatter the PCA
       if (input$cbSplitScatter != "none"){
         gg <- gg +  facet_wrap(input$cbSplitScatter)
@@ -575,6 +591,11 @@ server <- function(input, output) {
       if (!is.null(ranges$x) & !is.null(ranges$y)) {
         gg <- gg + scale_x_continuous(limits = ranges$x)
         gg <- gg + scale_y_continuous(limits = ranges$y)
+      }
+      
+      # Remove legend
+      if (nrow(unique(dt$df[,color_column_name()])) > 40) {
+        gg <- gg + theme(legend.position = "none")
       }
       
       # Scatter the PCA
