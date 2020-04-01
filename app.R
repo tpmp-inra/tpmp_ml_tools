@@ -20,7 +20,8 @@ list.of.packages <- c("shiny",
                       "Rtsne",
                       "factoextra",
                       "cluster",
-                      "gtools")
+                      "gtools",
+                      "devtools")
 
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -39,8 +40,8 @@ library(Rtsne)
 library(factoextra)
 library(cluster)
 library(gtools)
-
-source('../shinyCommon/R/shiny_common_all.R')
+library(devtools)
+devtools::install_github("tpmp-inra/tpmp_shiny_common")
 
 # Define UI for application that draws a histogram
 ui <- fluidPage(
